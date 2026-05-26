@@ -1,0 +1,20 @@
+﻿@model WebApplication4.Models.Greeting
+@{
+    ViewData["Title"] = "Удалить приветствие";
+}
+
+<h2>Вы уверены, что хотите удалить это приветствие?</h2>
+<dl class="row">
+    <dt class="col-sm-2">ID</dt>
+    <dd class="col-sm-10">@Model.Id</dd>
+    <dt class="col-sm-2">Имя</dt>
+    <dd class="col-sm-10">@Model.Name</dd>
+    <dt class="col-sm-2">Дата</dt>
+    <dd class="col-sm-10">@Model.CreatedAt.ToString("g")</dd>
+</dl>
+
+<form asp-action="Delete" method="post">
+    <input type="hidden" asp-for="Id" />
+    <button type="submit" class="btn btn-danger">Удалить</button>
+    <a asp-action="Index" class="btn btn-secondary">Отмена</a>
+</form>

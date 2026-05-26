@@ -1,0 +1,335 @@
+﻿@{
+    ViewData["Title"] = "Карта меток";
+}
+
+<h2>Интерактивная карта</h2>
+<p>Кликни в любом месте карты, чтобы оставить метку.</p>
+
+<div id="map" style="height: 500px; width: 100%; border: 1px solid #ccc;"></div>
+
+<!-- Модальное окно для ввода/редактирования сообщения -->
+<div class="modal fade" id="markerModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Метка</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="markerForm">
+                    <div class="mb-3">
+                        <label class="form-label">Цвет метки</label>
+                        <div class="d-flex align-items-center gap-2 mb-2" id="colorPresets">
+                        </div>
+                        <input type="color" id="markerColor" class="form-control form-control-color" value="#3388ff" title="Выберите цвет" />
+                    </div>
+                    <div class="mb-3">
+                        <label for="message" class="form-label">Сообщение</label>
+                        <textarea class="form-control" id="message" rows="3" required maxlength="500"></textarea>
+                    </div>
+                    <input type="hidden" id="lat" />
+                    <input type="hidden" id="lng" />
+                    <input type="hidden" id="editId" />
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary" id="saveMarker">Сохранить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+       <script>
+        const colorPresets = ['#3388ff', '#ff3333', '#33cc33', '#ffaa00', '#aa33ff', '#ff66cc', '#00ccff', '#ff9933', '#66ff66'];
+
+        function renderColorPresets() {
+            const container = document.getElementById('colorPresets');
+            if (!container) return;
+            container.innerHTML = '';
+            colorPresets.forEach(c => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn btn-sm';
+                btn.style.backgroundColor = c;
+                btn.style.width = '30px';
+                btn.style.height = '30px';
+                btn.style.borderRadius = '50%';
+                btn.style.border = c === document.getElementById('markerColor').value ? '3px solid black' : '3px solid transparent';
+                btn.onclick = () => {
+                    document.getElementById('markerColor').value = c;
+                    document.querySelectorAll('#colorPresets button').forEach(b => b.style.border = '3px solid transparent');
+                    btn.style.border = '3px solid black';
+                };
+                container.appendChild(btn);
+            });
+        }
+        renderColorPresets();
+
+        // Инициализация карты
+        var map = L.map('map').setView([53.9, 27.5], 6);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        var markersCluster = L.markerClusterGroup();
+        map.addLayer(markersCluster);
+
+        function formatDate(dateStr) {
+            return new Date(dateStr).toLocaleString('ru-RU', {
+                year: 'numeric', month: 'long', day: 'numeric',
+                hour: '2-digit', minute: '2-digit'
+            });
+        }
+
+        // Загрузка комментариев
+        function loadComments(markerId, container) {
+            fetch(`/Map/GetComments?markerId=${markerId}`)
+                .then(res => res.json())
+                .then(comments => {
+                    if (comments.length === 0) {
+                        container.innerHTML = '<div class="text-muted small">Пока нет комментариев</div>';
+                    } else {
+                       container.innerHTML = comments.map(c => {
+                            var avatar = c.authorPicture ? c.authorPicture : '/uploads/avatars/default.png';
+                            return `<div class="comment-item border-bottom pb-1 mb-1">
+                                <img src="${avatar}" width="20" height="20" class="rounded-circle me-1" />
+                                <b>${c.author}</b>: ${c.text}
+                                <small class="text-muted">${formatDate(c.createdAt)}</small>
+                            </div>`;
+                        }).join('');
+                    }
+                })
+                .catch(err => {
+                    container.innerHTML = '<div class="text-danger small">Ошибка загрузки</div>';
+                    console.error(err);
+                });
+        }
+
+        // Загрузка всех меток
+        function loadMarkers() {
+            fetch('/Map/GetMarkers')
+                .then(res => res.json())
+                .then(markers => {
+                    markersCluster.clearLayers();
+                    markers.forEach(m => {
+                        var color = m.color || '#3388ff';
+                        var icon = L.divIcon({
+                            className: 'custom-marker',
+                            html: `<div style="background-color:${color}; width:22px; height:22px; border-radius:50%; border:2px solid white; box-shadow:0 0 4px rgba(0,0,0,0.5);"></div>`,
+                            iconSize: [22, 22],
+                            iconAnchor: [11, 11],
+                            popupAnchor: [0, -11]
+                        });
+
+                        var marker = L.marker([m.latitude, m.longitude], { icon: icon });
+
+                        var actionsHtml = '';
+                        if (m.isOwner || m.isAdmin) {
+                            actionsHtml = `<button class="btn btn-sm btn-outline-warning edit-marker me-1" data-id="${m.id}">✎</button>
+                                           <button class="btn btn-sm btn-outline-danger delete-marker" data-id="${m.id}">✖</button>`;
+                        }
+
+                        var authBlock = '';
+                        @if (User.Identity?.IsAuthenticated == true)
+                        {
+                            <text>
+                        authBlock = `<div class="input-group mt-1">
+                                        <input type="text" class="form-control form-control-sm comment-input" placeholder="Комментарий..." />
+                                        <button class="btn btn-sm btn-outline-primary send-comment" type="button">➤</button>
+                                     </div>`;
+                            </text>
+                        }
+                        else
+                        {
+                            <text>
+                        authBlock = '<small class="text-muted">Войдите для комментариев</small>';
+                            </text>
+                        }
+
+                        var authorPicture = m.authorPicture ? m.authorPicture : '/uploads/avatars/default.png';
+                        var popupContent = `
+                            <img src="${authorPicture}" width="24" height="24" class="rounded-circle me-1" />
+                            <b>${m.author}</b><br>
+                            ${m.message}<br>
+                            <small>${formatDate(m.createdAt)}</small>
+                            <div class="marker-actions mt-2">${actionsHtml}</div>
+                            <hr class="my-2"/>
+                            <div class="comments-section" data-marker-id="${m.id}">
+                                <div class="comments-list" style="max-height:150px; overflow-y:auto;"></div>
+                                ${authBlock}
+                            </div>`;
+
+                        marker.bindPopup(popupContent);
+
+                        marker.on('popupopen', function() {
+                            var commentsContainer = document.querySelector(`.comments-section[data-marker-id="${m.id}"] .comments-list`);
+                            if (commentsContainer && commentsContainer.dataset.loaded !== 'true') {
+                                loadComments(m.id, commentsContainer);
+                                commentsContainer.dataset.loaded = 'true';
+                            }
+                        });
+
+                        markersCluster.addLayer(marker);
+                    });
+                });
+        }
+
+        loadMarkers();
+
+        var clickedLat, clickedLng;
+
+        map.on('click', function(e) {
+            @if (User.Identity?.IsAuthenticated == true)
+            {
+                <text>
+                document.getElementById('editId').value = '';
+                document.getElementById('message').value = '';
+                document.getElementById('markerColor').value = '#3388ff';
+                renderColorPresets();
+                clickedLat = e.latlng.lat;
+                clickedLng = e.latlng.lng;
+                document.getElementById('lat').value = clickedLat;
+                document.getElementById('lng').value = clickedLng;
+                var modal = new bootstrap.Modal(document.getElementById('markerModal'));
+                modal.show();
+                </text>
+            }
+            else
+            {
+                <text>
+                alert('Войдите, чтобы оставлять метки.');
+                </text>
+            }
+        });
+
+        document.getElementById('saveMarker').addEventListener('click', function() {
+            var message = document.getElementById('message').value.trim();
+            if (!message) { alert('Введите сообщение'); return; }
+
+            var editId = document.getElementById('editId').value;
+            var token = document.getElementsByName('__RequestVerificationToken')[0]?.value;
+            var url, method, body;
+
+            if (editId) {
+                url = '/Map/EditMarker';
+                method = 'POST';
+                body = JSON.stringify({
+                    id: parseInt(editId),
+                    message: message,
+                    color: document.getElementById('markerColor').value
+                });
+            } else {
+                url = '/Map/CreateMarker';
+                method = 'POST';
+                body = JSON.stringify({
+                    latitude: parseFloat(document.getElementById('lat').value),
+                    longitude: parseFloat(document.getElementById('lng').value),
+                    message: message,
+                    color: document.getElementById('markerColor').value
+                });
+            }
+
+            fetch(url, {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'RequestVerificationToken': token
+                },
+                body: body
+            })
+            .then(res => {
+                if (!res.ok) throw new Error('Ошибка сохранения');
+                return res.json();
+            })
+            .then(result => {
+                bootstrap.Modal.getInstance(document.getElementById('markerModal')).hide();
+                loadMarkers();
+            })
+            .catch(err => alert(err.message));
+        });
+
+        document.addEventListener('click', function(e) {
+            if (e.target.classList.contains('edit-marker')) {
+                var id = e.target.getAttribute('data-id');
+                fetch('/Map/GetMarker?id=' + id)
+                    .then(res => res.json())
+                    .then(data => {
+                        document.getElementById('editId').value = data.id;
+                        document.getElementById('message').value = data.message;
+                        document.getElementById('markerColor').value = data.color || '#3388ff';
+                        renderColorPresets();
+                        document.getElementById('lat').value = data.latitude;
+                        document.getElementById('lng').value = data.longitude;
+                        var modal = new bootstrap.Modal(document.getElementById('markerModal'));
+                        modal.show();
+                    });
+            }
+
+            if (e.target.classList.contains('delete-marker')) {
+                if (!confirm('Удалить метку?')) return;
+                var id = e.target.getAttribute('data-id');
+                var token = document.getElementsByName('__RequestVerificationToken')[0]?.value;
+
+                fetch('/Map/DeleteMarker', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'RequestVerificationToken': token
+                    },
+                    body: JSON.stringify(parseInt(id))
+                })
+                .then(res => {
+                    if (!res.ok) throw new Error('Ошибка удаления');
+                    return res.json();
+                })
+                .then(result => {
+                    loadMarkers();
+                })
+                .catch(err => alert(err.message));
+            }
+
+            if (e.target.classList.contains('send-comment')) {
+                var btn = e.target;
+                var section = btn.closest('.comments-section');
+                if (!section) return;
+                var input = section.querySelector('.comment-input');
+                var text = input.value.trim();
+                if (!text) return;
+
+                var markerId = section.getAttribute('data-marker-id');
+                var token = document.getElementsByName('__RequestVerificationToken')[0]?.value;
+
+                fetch('/Map/AddComment', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'RequestVerificationToken': token
+                    },
+                    body: JSON.stringify({ markerId: parseInt(markerId), text: text })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        input.value = '';
+                        var commentsList = section.querySelector('.comments-list');
+                        commentsList.dataset.loaded = 'false';
+                        loadComments(parseInt(markerId), commentsList);
+                        commentsList.dataset.loaded = 'true';
+                    } else {
+                        alert('Ошибка при добавлении');
+                    }
+                })
+                .catch(err => alert('Ошибка соединения'));
+            }
+        });
+    </script>
+}
