@@ -13,11 +13,9 @@ namespace WebApplication4.Models
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-        // Связь с меткой
         public int MapMarkerId { get; set; }
         public MapMarker MapMarker { get; set; }
 
-        // Связь с пользователем
         public string UserId { get; set; }
         public ApplicationUser User { get; set; }
     }

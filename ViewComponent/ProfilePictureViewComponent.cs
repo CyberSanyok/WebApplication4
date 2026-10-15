@@ -17,7 +17,7 @@ namespace WebApplication4.ViewComponents
         public async Task<IViewComponentResult> InvokeAsync()
         {
             var user = await _userManager.GetUserAsync(HttpContext.User);
-            string avatarUrl = "/uploads/avatars/default.png"; // дефолтная картинка
+            string avatarUrl = "/uploads/avatars/default.png"; 
             string userName = "Гость";
 
             if (user != null)
